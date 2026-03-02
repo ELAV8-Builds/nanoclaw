@@ -30,6 +30,7 @@ import {
   initDatabase,
   setRegisteredGroup,
   setRouterState,
+  clearSession,
   setSession,
   storeChatMetadata,
   storeMessage,
@@ -305,17 +306,21 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-    }
-
     if (output.status === 'error') {
+      // Clear session so the next retry starts fresh instead of resuming
+      // a potentially corrupted or missing session.
+      delete sessions[group.folder];
+      clearSession(group.folder);
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
       );
       return 'error';
+    }
+
+    if (output.newSessionId) {
+      sessions[group.folder] = output.newSessionId;
+      setSession(group.folder, output.newSessionId);
     }
 
     return 'success';

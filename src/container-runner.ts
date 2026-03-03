@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -150,6 +151,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount gh CLI config so containers can use `gh` for GitHub operations.
+  // Read-only: containers should not modify the host's auth tokens.
+  const ghConfigDir = path.join(os.homedir(), '.config', 'gh');
+  if (fs.existsSync(ghConfigDir)) {
+    mounts.push({
+      hostPath: ghConfigDir,
+      containerPath: '/home/node/.config/gh',
+      readonly: true,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -202,6 +214,8 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ * All keys here are merged into the SDK env only (not process.env)
+ * and stripped from Bash subprocesses by the sanitize hook.
  */
 function readSecrets(): Record<string, string> {
   return readEnvFile([
@@ -209,6 +223,10 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'LITELLM_MASTER_KEY',
+    'ANYTHINGLLM_API_KEY',
+    'GITHUB_TOKEN',
+    'SLACK_BOT_TOKEN',
   ]);
 }
 
@@ -216,10 +234,15 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
 ): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '-i', '--rm', '--add-host=host.docker.internal:host-gateway', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Service keys (LITELLM_MASTER_KEY, ANYTHINGLLM_API_KEY) are now passed via
+  // stdin secrets — not as -e env vars. This keeps them out of process.env
+  // inside the container so the LLM cannot read or echo them. The SDK env
+  // receives them, and the bash sanitize hook strips them from subprocesses.
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

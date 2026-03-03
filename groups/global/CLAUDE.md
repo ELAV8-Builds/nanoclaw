@@ -56,3 +56,80 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 - ```triple backticks``` for code
 
 No ## headings. No [links](url). No **double stars**.
+
+---
+
+## Service Contract
+
+You run inside a Docker container. Use `host.docker.internal` (NOT `localhost`) to reach all host services. `localhost` inside the container is the container itself.
+
+### Service Endpoints
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| memU | `http://host.docker.internal:8090` | Persistent semantic memory (retrieve/memorize) |
+| LiteLLM | `http://host.docker.internal:4000` | Cost-based model routing (5 tiers) |
+| Ollama | `http://host.docker.internal:11434` | Local LLM inference |
+| AnythingLLM | `http://host.docker.internal:3001` | RAG / document knowledge base |
+
+### Health Probes
+
+Before relying on a service, verify it is functional (not just reachable):
+
+```bash
+# memU — expect non-500 response
+curl -sf -X POST http://host.docker.internal:8090/retrieve \
+  -H 'Content-Type: application/json' -d '{"query":"health"}'
+
+# LiteLLM — expect "I'm alive!"
+curl -sf http://host.docker.internal:4000/health/liveliness
+
+# Ollama — expect non-empty .models array
+curl -sf http://host.docker.internal:11434/api/tags | grep -q '"models":\[.\+'
+
+# AnythingLLM — expect {"authenticated":true}
+curl -sf http://host.docker.internal:3001/api/v1/auth \
+  -H "Authorization: Bearer $ANYTHINGLLM_API_KEY"
+```
+
+### Memory Hierarchy
+
+When you need context, check sources in this priority order:
+
+1. **Current session context** — what's already in the conversation
+2. **Group file memory** — files in `/workspace/group/`
+3. **Global file memory** — this file and `/workspace/global/`
+4. **memU semantic retrieval** — `POST http://host.docker.internal:8090/retrieve` with `{"query":"..."}`
+5. **AnythingLLM document search** — uploaded docs, PDFs, knowledge bases
+
+### memU Discipline
+
+- **Retrieve before planning.** At the start of non-trivial tasks, check memU for prior context: `curl -s -X POST http://host.docker.internal:8090/retrieve -H 'Content-Type: application/json' -d '{"query":"[topic]"}'`
+- **Memorize at milestones.** Store key decisions, progress, and learnings: `curl -s -X POST http://host.docker.internal:8090/memorize -H 'Content-Type: application/json' -d '{"content":[{"role":"assistant","content":{"text":"[summary]"},"created_at":"[ISO timestamp]"}]}'`
+- **Memorize before finishing.** Always store a summary before your final response on significant tasks.
+- **Fallback on failure.** If memU returns an error, write a timestamped note to `/workspace/group/memu-fallback.md` and continue. Retry memU on your next task.
+
+### Degraded Mode Protocol
+
+If a service is down, do not fail the entire task. Follow these fallbacks:
+
+| Service | Fallback |
+|---------|----------|
+| memU fails | Continue with file memory. Write fallback notes to `/workspace/group/memu-fallback.md`. Retry next task. |
+| LiteLLM fails | Fall back to the container's default model (direct Anthropic). |
+| Ollama empty/down | Skip local inference. Use LiteLLM cloud tiers only. |
+| AnythingLLM fails | Skip document search. Note the gap in your output. |
+
+### LiteLLM Model Tiers
+
+Route requests through LiteLLM at `http://host.docker.internal:4000`:
+
+| Tier | Model | Cost | Use For |
+|------|-------|------|---------|
+| `trivial` | Claude Haiku | Lowest | Simple formatting, extraction, classification |
+| `light` | Claude Haiku | Lowest | Scanning, filtering, quick tasks |
+| `coder` | Claude Sonnet | Medium | Code generation, implementation |
+| `medium` | Claude Sonnet | Medium | Research synthesis, code review, moderate reasoning |
+| `heavy` | Claude Opus | Highest | Deep strategy, architecture, complex reasoning |
+
+All 5 tiers are active and route through Anthropic API. Use the cheapest tier that can handle the task. `trivial` and `light` are both Haiku (use interchangeably for cheap tasks). `coder` and `medium` are both Sonnet.

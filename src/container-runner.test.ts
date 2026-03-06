@@ -252,11 +252,7 @@ describe('container-runner networkMode', () => {
   });
 
   it('does not pass --network flag when networkMode is undefined', async () => {
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-    );
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
     emitOutputMarker(fakeProc, {
       status: 'success',

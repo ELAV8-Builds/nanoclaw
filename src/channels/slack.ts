@@ -70,14 +70,29 @@ export class SlackChannel implements Channel {
     // message subtypes including bot_message (needed to track our own output)
     this.app.event('message', async ({ event }) => {
       const subtype = (event as { subtype?: string }).subtype;
-      const allowedSubtypes = new Set([undefined, 'bot_message', 'file_share', 'me_message']);
+      const allowedSubtypes = new Set([
+        undefined,
+        'bot_message',
+        'file_share',
+        'me_message',
+      ]);
       if (subtype && !allowedSubtypes.has(subtype)) return;
 
       const msg = event as HandledMessageEvent;
 
       // Extract file metadata from Slack file attachments.
       // The agent receives URLs it can fetch with curl or WebFetch.
-      const files = (event as { files?: Array<{ name?: string; mimetype?: string; url_private_download?: string; url_private?: string; filetype?: string }> }).files;
+      const files = (
+        event as {
+          files?: Array<{
+            name?: string;
+            mimetype?: string;
+            url_private_download?: string;
+            url_private?: string;
+            filetype?: string;
+          }>;
+        }
+      ).files;
       let fileContext = '';
       if (files && files.length > 0) {
         const descriptions = files.map((f) => {
@@ -106,8 +121,7 @@ export class SlackChannel implements Channel {
       const groups = this.opts.registeredGroups();
       if (!groups[jid]) return;
 
-      const isBotMessage =
-        !!msg.bot_id || msg.user === this.botUserId;
+      const isBotMessage = !!msg.bot_id || msg.user === this.botUserId;
 
       let senderName: string;
       if (isBotMessage) {
@@ -125,7 +139,10 @@ export class SlackChannel implements Channel {
       let content = (msg.text || '') + fileContext;
       if (this.botUserId && !isBotMessage) {
         const mentionPattern = `<@${this.botUserId}>`;
-        if (content.includes(mentionPattern) && !TRIGGER_PATTERN.test(content)) {
+        if (
+          content.includes(mentionPattern) &&
+          !TRIGGER_PATTERN.test(content)
+        ) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
       }
@@ -154,10 +171,7 @@ export class SlackChannel implements Channel {
       this.botUserId = auth.user_id as string;
       logger.info({ botUserId: this.botUserId }, 'Connected to Slack');
     } catch (err) {
-      logger.warn(
-        { err },
-        'Connected to Slack but failed to get bot user ID',
-      );
+      logger.warn({ err }, 'Connected to Slack but failed to get bot user ID');
     }
 
     this.connected = true;
@@ -277,9 +291,7 @@ export class SlackChannel implements Channel {
     }
   }
 
-  private async resolveUserName(
-    userId: string,
-  ): Promise<string | undefined> {
+  private async resolveUserName(userId: string): Promise<string | undefined> {
     if (!userId) return undefined;
 
     const cached = this.userNameCache.get(userId);

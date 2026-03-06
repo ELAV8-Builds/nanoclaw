@@ -143,6 +143,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        modelTier: group.containerConfig?.modelTier,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

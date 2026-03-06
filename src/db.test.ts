@@ -7,7 +7,9 @@ import {
   getAllChats,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -386,5 +388,38 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- Registered group containerConfig round-trip ---
+
+describe('registered group containerConfig', () => {
+  it('round-trips networkMode through set/get', () => {
+    setRegisteredGroup('test-private@local', {
+      name: 'private',
+      folder: 'private-test',
+      trigger: '@Bizo',
+      added_at: new Date().toISOString(),
+      containerConfig: { networkMode: 'nanoclaw-isolated', timeout: 600000 },
+    });
+
+    const group = getRegisteredGroup('test-private@local');
+    expect(group).toBeDefined();
+    expect(group!.containerConfig).toBeDefined();
+    expect(group!.containerConfig!.networkMode).toBe('nanoclaw-isolated');
+    expect(group!.containerConfig!.timeout).toBe(600000);
+  });
+
+  it('returns undefined containerConfig when not set', () => {
+    setRegisteredGroup('test-plain@local', {
+      name: 'plain',
+      folder: 'plain-test',
+      trigger: '@Bizo',
+      added_at: new Date().toISOString(),
+    });
+
+    const group = getRegisteredGroup('test-plain@local');
+    expect(group).toBeDefined();
+    expect(group!.containerConfig).toBeUndefined();
   });
 });

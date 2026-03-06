@@ -25,7 +25,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { ContainerConfig, RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -39,6 +39,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  modelTier?: string;
   secrets?: Record<string, string>;
 }
 
@@ -223,6 +224,8 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY',
     'LITELLM_MASTER_KEY',
     'ANYTHINGLLM_API_KEY',
     'GITHUB_TOKEN',
@@ -233,6 +236,7 @@ function readSecrets(): Record<string, string> {
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  containerConfig?: ContainerConfig,
 ): string[] {
   const args: string[] = [
     'run',
@@ -269,6 +273,10 @@ function buildContainerArgs(
     }
   }
 
+  if (containerConfig?.networkMode) {
+    args.push('--network', containerConfig.networkMode);
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
@@ -288,7 +296,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group.containerConfig);
 
   logger.debug(
     {

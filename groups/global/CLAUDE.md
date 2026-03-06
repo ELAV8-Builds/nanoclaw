@@ -68,7 +68,7 @@ You run inside a Docker container. Use `host.docker.internal` (NOT `localhost`) 
 | Service | URL | Purpose |
 |---------|-----|---------|
 | memU | `http://host.docker.internal:8090` | Persistent semantic memory (retrieve/memorize) |
-| LiteLLM | `http://host.docker.internal:4000` | Cost-based model routing (5 tiers) |
+| LiteLLM | `http://host.docker.internal:4000` | Cost-based model routing (9 tiers, 3 providers) |
 | Ollama | `http://host.docker.internal:11434` | Local LLM inference |
 | AnythingLLM | `http://host.docker.internal:3001` | RAG / document knowledge base |
 
@@ -87,9 +87,8 @@ curl -sf http://host.docker.internal:4000/health/liveliness
 # Ollama — expect non-empty .models array
 curl -sf http://host.docker.internal:11434/api/tags | grep -q '"models":\[.\+'
 
-# AnythingLLM — expect {"authenticated":true}
-curl -sf http://host.docker.internal:3001/api/v1/auth \
-  -H "Authorization: Bearer $ANYTHINGLLM_API_KEY"
+# AnythingLLM — any HTTP response means it's running (403 is normal without API key)
+curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:3001/api/v1/auth | grep -qv "000"
 ```
 
 ### Memory Hierarchy
@@ -124,12 +123,25 @@ If a service is down, do not fail the entire task. Follow these fallbacks:
 
 Route requests through LiteLLM at `http://host.docker.internal:4000`:
 
-| Tier | Model | Cost | Use For |
-|------|-------|------|---------|
-| `trivial` | Claude Haiku | Lowest | Simple formatting, extraction, classification |
-| `light` | Claude Haiku | Lowest | Scanning, filtering, quick tasks |
-| `coder` | Claude Sonnet | Medium | Code generation, implementation |
-| `medium` | Claude Sonnet | Medium | Research synthesis, code review, moderate reasoning |
-| `heavy` | Claude Opus | Highest | Deep strategy, architecture, complex reasoning |
+| Tier | Model | Provider | Cost | Use For |
+|------|-------|----------|------|---------|
+| `trivial` | Claude Haiku | Anthropic | Lowest | Simple formatting, extraction, classification |
+| `light` | Claude Haiku | Anthropic | Lowest | Scanning, filtering, quick tasks |
+| `coder` | Claude Sonnet | Anthropic | Medium | Day-to-day feature work, implementation |
+| `medium` | Claude Sonnet | Anthropic | Medium | Research synthesis, code review, moderate reasoning |
+| `heavy` | Claude Opus | Anthropic | Highest | Architecture, strategy, arbitration, complex reasoning |
+| `codex` | GPT-5.2 Codex | OpenAI | Medium | Second opinion on complex code when Sonnet hesitates |
+| `crosscheck` | GPT-5.2 | OpenAI | High | Cross-check, alternate strategic takes |
+| `critic` | GPT-5.2 | OpenAI | High | Security review, red-team, adversarial analysis |
+| `creative` | Gemini 3.1 Pro | Google | Medium | UX, visual design, motion graphics, storytelling |
 
-All 5 tiers are active and route through Anthropic API. Use the cheapest tier that can handle the task. `trivial` and `light` are both Haiku (use interchangeably for cheap tasks). `coder` and `medium` are both Sonnet.
+9 tiers across 3 providers. Use the cheapest tier that can handle the task. `trivial` and `light` are both Haiku. `coder` and `medium` are both Sonnet. `crosscheck` and `critic` are both GPT-5.2 (different prompting intent).
+
+### Tier Routing Heuristics
+
+- **Default**: `coder` (Sonnet) for any "implement X / modify Y" task.
+- **Auto-upgrade to `heavy`** (Opus) when: diff touches >5 files, changes core abstractions/auth/persistence, or you express low confidence.
+- **Auto-downgrade to `light`** (Haiku) for: single-file localized edits, explanations, annotations, docstrings.
+- **Fork to `creative`** (Gemini) when: request mentions UI, UX, flows, visuals, animation, motion, or storytelling.
+- **Fork to `codex`** (GPT-5.2 Codex) when: you want a second opinion on complex code, or Sonnet gets stuck cycling.
+- **Run `critic`** (GPT-5.2) before merge on: security-sensitive changes, new integrations touching external APIs/credentials/data export.

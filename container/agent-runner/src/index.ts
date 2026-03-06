@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  modelTier?: string;
   secrets?: Record<string, string>;
 }
 
@@ -58,6 +59,85 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+const IMAGE_PLACEHOLDER = '[image removed — session compacted]';
+const CLAUDE_PROJECTS_DIR = '/home/node/.claude/projects';
+
+/**
+ * Strip base64 image blocks from a session transcript to prevent
+ * "Could not process image" errors on resume. Replaces image content
+ * blocks with a small text placeholder so conversation structure is preserved.
+ */
+function stripImagesFromTranscript(sessionId: string): { stripped: number; fileSize: number } | null {
+  let transcriptPath: string | null = null;
+  try {
+    if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) return null;
+    for (const dir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+      const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
+      if (fs.existsSync(candidate)) {
+        transcriptPath = candidate;
+        break;
+      }
+    }
+  } catch { return null; }
+
+  if (!transcriptPath) return null;
+
+  try {
+    const content = fs.readFileSync(transcriptPath, 'utf-8');
+    const lines = content.split('\n');
+    let stripped = 0;
+
+    const rewritten = lines.map(line => {
+      if (!line.trim()) return line;
+      if (!line.includes('"type":"image"')) return line;
+
+      try {
+        const entry = JSON.parse(line);
+        const contentArr = entry.message?.content;
+        if (!Array.isArray(contentArr)) return line;
+
+        let changed = false;
+        entry.message.content = contentArr.map((block: Record<string, unknown>) => {
+          if (block.type === 'image') {
+            changed = true;
+            stripped++;
+            return { type: 'text', text: IMAGE_PLACEHOLDER };
+          }
+          if (block.type === 'tool_result' && Array.isArray(block.content)) {
+            const inner = block.content as Array<Record<string, unknown>>;
+            const hasImage = inner.some(c => c.type === 'image');
+            if (hasImage) {
+              block.content = inner.map(c => {
+                if (c.type === 'image') {
+                  changed = true;
+                  stripped++;
+                  return { type: 'text', text: IMAGE_PLACEHOLDER };
+                }
+                return c;
+              });
+            }
+          }
+          return block;
+        });
+
+        return changed ? JSON.stringify(entry) : line;
+      } catch {
+        return line;
+      }
+    });
+
+    if (stripped > 0) {
+      fs.writeFileSync(transcriptPath, rewritten.join('\n'));
+      log(`Stripped ${stripped} image(s) from session transcript (${transcriptPath})`);
+    }
+
+    return { stripped, fileSize: Buffer.byteLength(rewritten.join('\n')) };
+  } catch (err) {
+    log(`Failed to strip images from transcript: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -189,6 +269,8 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 // API keys and service tokens should never be visible to commands the agent runs.
 const SECRET_ENV_VARS = [
   'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'LITELLM_MASTER_KEY',
   'ANYTHINGLLM_API_KEY',
@@ -519,6 +601,30 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
+  // Map modelTier to ANTHROPIC_MODEL so the SDK uses the correct model.
+  // Non-Anthropic tiers (creative, critic, codex, crosscheck) are accessed
+  // via LiteLLM curl calls from agent prompts, not as the SDK model.
+  if (containerInput.modelTier) {
+    const TIER_TO_MODEL: Record<string, string> = {
+      heavy: 'claude-opus-4-6',
+      architect: 'claude-opus-4-6',
+      strategist: 'claude-opus-4-6',
+      coder: 'claude-sonnet-4-5-20250929',
+      medium: 'claude-sonnet-4-5-20250929',
+      engineer: 'claude-sonnet-4-5-20250929',
+      light: 'claude-haiku-4-5-20251001',
+      copilot: 'claude-haiku-4-5-20251001',
+      trivial: 'claude-haiku-4-5-20251001',
+    };
+    const model = TIER_TO_MODEL[containerInput.modelTier];
+    if (model) {
+      sdkEnv['ANTHROPIC_MODEL'] = model;
+      log(`Model tier "${containerInput.modelTier}" -> ANTHROPIC_MODEL=${model}`);
+    } else {
+      log(`Model tier "${containerInput.modelTier}" has no SDK mapping (non-Anthropic tier, using default)`);
+    }
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
@@ -527,6 +633,15 @@ async function main(): Promise<void> {
 
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+
+  // Strip base64 images from session transcript before resuming.
+  // Prevents "Could not process image" API errors from stale/large screenshots.
+  if (sessionId) {
+    const result = stripImagesFromTranscript(sessionId);
+    if (result && result.stripped > 0) {
+      log(`Pre-resume cleanup: removed ${result.stripped} images, transcript now ${(result.fileSize / 1024 / 1024).toFixed(1)}MB`);
+    }
+  }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;

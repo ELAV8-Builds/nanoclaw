@@ -30,6 +30,8 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  networkMode?: string; // Docker --network flag (e.g. "nanoclaw-isolated", "none")
+  modelTier?: string; // SDK model selection: "heavy" -> Opus, "coder"/"medium" -> Sonnet, "light" -> Haiku
 }
 
 export interface RegisteredGroup {

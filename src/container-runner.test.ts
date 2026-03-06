@@ -85,6 +85,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -205,5 +206,70 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner networkMode', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes --network flag when containerConfig.networkMode is set', async () => {
+    const isolatedGroup: RegisteredGroup = {
+      name: 'Private',
+      folder: 'private',
+      trigger: '@Bizo',
+      added_at: new Date().toISOString(),
+      containerConfig: { networkMode: 'nanoclaw-isolated' },
+    };
+
+    const resultPromise = runContainerAgent(
+      isolatedGroup,
+      { ...testInput, groupFolder: 'private' },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'done',
+      newSessionId: 'session-net-1',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).toContain('--network');
+    const networkIdx = spawnArgs.indexOf('--network');
+    expect(spawnArgs[networkIdx + 1]).toBe('nanoclaw-isolated');
+  });
+
+  it('does not pass --network flag when networkMode is undefined', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'done',
+      newSessionId: 'session-net-2',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).not.toContain('--network');
   });
 });

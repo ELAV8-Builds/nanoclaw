@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .npm-cache/
+
 # Build output
 dist/
 
@@ -9,18 +10,20 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
-groups/*
-!groups/main/
-!groups/global/
+# Groups — track CLAUDE.md for every agent, ignore runtime artifacts
+groups/*/logs/
+groups/*/conversations/
+groups/*/skills/
+
+# Main group: track CLAUDE.md + sovereign-skills, ignore Bizo build artifacts
 groups/main/*
-groups/global/*
 !groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+!groups/main/sovereign-skills/
 
 # Secrets
 *.keys.json
 .env
+.envexport
 
 # OS
 .DS_Store
@@ -28,8 +31,13 @@ groups/global/*
 # IDE
 .idea/
 .vscode/
+.claude/
 
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# SDK docs cache
 agents-sdk-docs
+
+# Backup files
+*.bak

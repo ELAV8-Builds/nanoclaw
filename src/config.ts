@@ -19,6 +19,12 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
+// Heartbeat: how often to check container health (default: 1 minute)
+export const HEARTBEAT_INTERVAL = parseInt(
+  process.env.HEARTBEAT_INTERVAL || '60000',
+  10,
+);
+
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || '/Users/user';

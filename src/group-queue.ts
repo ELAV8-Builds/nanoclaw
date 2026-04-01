@@ -57,6 +57,11 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  /** Expose internal group state map for heartbeat monitoring. */
+  getGroups(): Map<string, GroupState> {
+    return this.groups;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 

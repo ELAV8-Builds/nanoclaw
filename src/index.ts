@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  HEARTBEAT_INTERVAL,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -44,6 +45,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
+import { startHeartbeat } from './heartbeat.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -440,8 +442,10 @@ async function main(): Promise<void> {
   loadState();
 
   // Graceful shutdown handlers
+  let heartbeatHandle: { stop: () => void } | null = null;
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    heartbeatHandle?.stop();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -517,6 +521,13 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+
+  // Start heartbeat monitor (checks container health every HEARTBEAT_INTERVAL ms)
+  heartbeatHandle = startHeartbeat({
+    getActiveGroups: () => queue.getGroups(),
+    intervalMs: HEARTBEAT_INTERVAL,
+  });
+
   startMessageLoop();
 }
 

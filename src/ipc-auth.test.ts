@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
 import {
   _initTestDatabase,
@@ -8,6 +10,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
+import { DATA_DIR } from './config.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
@@ -669,5 +672,98 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- reset_context authorization ---
+
+describe('reset_context authorization', () => {
+  const testInputDir = path.join(DATA_DIR, 'ipc', 'other-group', 'input');
+
+  afterEach(() => {
+    // Clean up IPC input files created during tests
+    try {
+      if (fs.existsSync(testInputDir)) {
+        for (const f of fs.readdirSync(testInputDir)) {
+          fs.unlinkSync(path.join(testInputDir, f));
+        }
+        fs.rmdirSync(testInputDir);
+      }
+    } catch { /* ignore */ }
+    try {
+      const mainInput = path.join(DATA_DIR, 'ipc', 'main', 'input');
+      if (fs.existsSync(mainInput)) {
+        for (const f of fs.readdirSync(mainInput)) {
+          fs.unlinkSync(path.join(mainInput, f));
+        }
+        fs.rmdirSync(mainInput);
+      }
+    } catch { /* ignore */ }
+  });
+
+  it('main group can reset any group context', async () => {
+    await processTaskIpc(
+      {
+        type: 'reset_context',
+        groupFolder: 'other-group',
+        chatJid: 'other@g.us',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    // Verify _close sentinel was written
+    expect(fs.existsSync(path.join(testInputDir, '_close'))).toBe(true);
+  });
+
+  it('group can reset its own context', async () => {
+    await processTaskIpc(
+      {
+        type: 'reset_context',
+        groupFolder: 'other-group',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(fs.existsSync(path.join(testInputDir, '_close'))).toBe(true);
+  });
+
+  it('non-main group cannot reset another groups context', async () => {
+    await processTaskIpc(
+      {
+        type: 'reset_context',
+        groupFolder: 'main',
+        chatJid: 'main@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    // _close should NOT be written for main group
+    const mainInput = path.join(DATA_DIR, 'ipc', 'main', 'input');
+    expect(
+      fs.existsSync(mainInput) &&
+        fs.existsSync(path.join(mainInput, '_close')),
+    ).toBe(false);
+  });
+
+  it('rejects reset_context without groupFolder', async () => {
+    await processTaskIpc(
+      {
+        type: 'reset_context',
+        chatJid: 'other@g.us',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    // Nothing should be written
+    expect(fs.existsSync(testInputDir)).toBe(false);
   });
 });

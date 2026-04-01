@@ -381,6 +381,51 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'reset_context':
+      // Heartbeat (or agent) requests a context reset for a group.
+      // This writes a _close sentinel to the container's input directory
+      // so the agent winds down gracefully. The session ID is cleared so
+      // the next message spawns a fresh context.
+      if (data.groupFolder) {
+        const targetFolder = data.groupFolder;
+        // Authorization: only main or the group itself can trigger resets
+        if (!isMain && targetFolder !== sourceGroup) {
+          logger.warn(
+            { sourceGroup, targetFolder },
+            'Unauthorized reset_context attempt blocked',
+          );
+          break;
+        }
+
+        // Write _close sentinel to signal the container to wind down
+        const inputDir = path.join(DATA_DIR, 'ipc', targetFolder, 'input');
+        try {
+          fs.mkdirSync(inputDir, { recursive: true });
+          fs.writeFileSync(path.join(inputDir, '_close'), '');
+        } catch (err) {
+          logger.error(
+            { targetFolder, err },
+            'Failed to write _close sentinel for reset_context',
+          );
+        }
+
+        logger.info(
+          {
+            sourceGroup,
+            targetFolder,
+            chatJid: data.chatJid,
+            reason: (data as { summary?: string }).summary || 'unknown',
+          },
+          'Context reset triggered via IPC',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid reset_context request - missing groupFolder',
+        );
+      }
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
